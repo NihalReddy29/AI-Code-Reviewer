@@ -1,0 +1,35 @@
+rules:
+  - id: python.lang.security.audit.formatted-sql-query
+    message: Possible SQL query built from a formatted string.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+    pattern-either:
+      - pattern: $DB.execute("..." % ...)
+      - pattern: $DB.execute("...".format(...))
+      - pattern: $DB.execute(f"...")
+      - pattern: $CUR.execute("..." % ...)
+  - id: python.lang.security.audit.subprocess-shell-true
+    message: subprocess invoked with shell=True.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+    pattern: subprocess.$FN(..., shell=True, ...)
+  - id: python.lang.security.audit.pickle-load
+    message: Unsafe deserialization via pickle.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+  - id: python.lang.security.audit.yaml-unsafe-load
+    message: yaml.load without an explicit SafeLoader is unsafe.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+    pattern: yaml.load(...)
