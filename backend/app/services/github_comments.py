@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.core.logging import get_logger, redact
-from app.schemas.findings import FindingSeverity, ReviewFinding, StructuredReview
+from app.schemas.findings import FindingCategory, FindingSeverity, ReviewFinding, StructuredReview
 from app.schemas.github import ChangedFile, PullRequestSnapshot
 from app.tools.github import GitHubAPIError, GitHubClient
 
@@ -30,6 +30,19 @@ def should_post_finding(finding: ReviewFinding) -> bool:
     if finding.verified is not True:
         return False
     return finding.severity in POSTABLE_SEVERITIES
+
+
+def _meets_config(
+    finding: ReviewFinding,
+    min_severity: FindingSeverity,
+    categories: list[FindingCategory] | None,
+) -> bool:
+    """Return True if the finding passes the config filters."""
+    if _SEVERITY_ORDER.get(finding.severity, 9) > _SEVERITY_ORDER.get(min_severity, 9):
+        return False
+    if categories is not None and finding.category not in categories:
+        return False
+    return True
 
 
 def comment_anchor(item: ChangedFile, line: int | None) -> dict | None:
@@ -60,7 +73,14 @@ def format_inline_comment(finding: ReviewFinding) -> str:
     return text
 
 
-def format_review_body(review: StructuredReview, posted: list[ReviewFinding], omitted: int) -> str:
+def format_review_body(
+    review: StructuredReview,
+    posted: list[ReviewFinding],
+    omitted: int,
+    *,
+    cap_omitted: list[ReviewFinding] | None = None,
+    config_warnings: list[str] | None = None,
+) -> str:
     lines = [
         "AI Code Reviewer summary",
         "",
@@ -70,9 +90,22 @@ def format_review_body(review: StructuredReview, posted: list[ReviewFinding], om
     ]
     if omitted:
         lines.append(f"{omitted} additional verified finding(s) were omitted (limit {MAX_INLINE_COMMENTS}).")
+    # Findings cut by max_comments cap are summarised in the body
+    if cap_omitted:
+        lines.append("")
+        lines.append(f"**{len(cap_omitted)} finding(s) above the inline comment cap:**")
+        for f in cap_omitted:
+            lines.append(
+                f"- **{f.severity.value} {f.category.value}** `{f.file}`"
+                + (f" line {f.line}" if f.line else "")
+                + f": {f.title}"
+            )
     unverified = sum(1 for item in review.findings if item.verified is not True)
     if unverified:
         lines.append(f"{unverified} finding(s) were not posted because they failed verification.")
+    if config_warnings:
+        lines.append("")
+        lines.append("⚠️ .codereviewer.yml was invalid; defaults were used.")
     text = redact("\n".join(lines))
     if len(text) > MAX_SUMMARY_CHARS:
         text = text[: MAX_SUMMARY_CHARS - 20] + "\n... [truncated]"
@@ -82,39 +115,87 @@ def format_review_body(review: StructuredReview, posted: list[ReviewFinding], om
 def build_review_comments(
     review: StructuredReview,
     snapshot: PullRequestSnapshot,
-) -> tuple[list[dict], list[ReviewFinding], int]:
+    *,
+    min_severity: FindingSeverity = FindingSeverity.MEDIUM,
+    categories: list[FindingCategory] | None = None,
+    max_comments: int = MAX_INLINE_COMMENTS,
+) -> tuple[list[dict], list[ReviewFinding], int, list[ReviewFinding]]:
+    """Build inline comments.
+
+    Returns (comments, posted, omitted_not_in_diff, cap_omitted).
+    cap_omitted: findings that were eligible but cut by the max_comments cap.
+    """
     files = {item.path.replace("\\", "/").lstrip("/"): item for item in snapshot.changed_files}
-    eligible = [item for item in review.findings if should_post_finding(item)]
+    eligible = [
+        item
+        for item in review.findings
+        if should_post_finding(item) and _meets_config(item, min_severity, categories)
+    ]
     eligible.sort(key=lambda item: (_SEVERITY_ORDER.get(item.severity, 9), item.file, item.line or 0))
     comments: list[dict] = []
     posted: list[ReviewFinding] = []
+    cap_omitted: list[ReviewFinding] = []
     for finding in eligible:
-        if len(comments) >= MAX_INLINE_COMMENTS:
-            break
         changed = files.get(finding.file)
         if changed is None:
             continue
         anchor = comment_anchor(changed, finding.line)
         if anchor is None:
             continue
+        if len(comments) >= max_comments:
+            cap_omitted.append(finding)
+            continue
         comments.append({**anchor, "body": format_inline_comment(finding)})
         posted.append(finding)
-    omitted = max(0, len(eligible) - len(posted))
-    return comments, posted, omitted
+    # "omitted" in the original sense = eligible but not in the diff
+    omitted = max(0, len(eligible) - len(posted) - len(cap_omitted))
+    return comments, posted, omitted, cap_omitted
 
 
 def post_verified_review(
     client: GitHubClient,
     snapshot: PullRequestSnapshot,
     review: StructuredReview,
+    *,
+    config: object | None = None,
+    config_warnings: list[str] | None = None,
 ) -> dict | None:
-    """Post a COMMENT review. Returns the GitHub payload, or None if there is nothing useful to post."""
+    """Post a COMMENT review. Returns the GitHub payload, or None if there is nothing useful to post.
 
-    comments, posted, omitted = build_review_comments(review, snapshot)
-    if not posted and not any(should_post_finding(item) for item in review.findings):
+    When `config` (a RepoConfig) is supplied, only findings that meet
+    review.min_severity and review.categories are posted, and inline comments
+    are capped at review.max_comments.
+    """
+    from app.schemas.repo_config import ReviewConfig
+
+    review_cfg: ReviewConfig | None = getattr(config, "review", None) if config is not None else None
+
+    min_severity = review_cfg.min_severity if review_cfg is not None else FindingSeverity.MEDIUM
+    categories = review_cfg.categories if review_cfg is not None else None
+    max_comments = review_cfg.max_comments if review_cfg is not None else MAX_INLINE_COMMENTS
+
+    comments, posted, omitted, cap_omitted = build_review_comments(
+        review,
+        snapshot,
+        min_severity=min_severity,
+        categories=categories,
+        max_comments=max_comments,
+    )
+    # Decide whether there is anything worth posting
+    any_eligible = any(
+        should_post_finding(item) and _meets_config(item, min_severity, categories)
+        for item in review.findings
+    )
+    if not posted and not any_eligible and not (config_warnings):
         return None
     ref = snapshot.pull_request
-    body = format_review_body(review, posted, omitted)
+    body = format_review_body(
+        review,
+        posted,
+        omitted,
+        cap_omitted=cap_omitted if cap_omitted else None,
+        config_warnings=config_warnings,
+    )
     try:
         return client.create_pull_request_review(
             ref.owner,

@@ -11,6 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.api.health import router as health_router
 from app.api.github import router as github_router
 from app.api.reviews import router as reviews_router
+from app.api.analytics import router as analytics_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger, log_event
 from app.database.session import engine, init_database
@@ -51,17 +52,23 @@ def create_app() -> FastAPI:
 
     @application.exception_handler(SQLAlchemyError)
     async def database_error_handler(_request: Request, exc: SQLAlchemyError) -> JSONResponse:
-        log_event(get_logger("app.main"), "database_request_failed", error_type=type(exc).__name__)
+        log_event(get_logger("app.main"), "database_request_failed", error_type=type(exc).__name__, error=str(exc))
+        settings = get_settings()
+        if settings.database_url.startswith("sqlite"):
+            detail = f"database error: {exc}" if settings.environment == "development" else "database is temporarily unavailable."
+        else:
+            detail = "database is unavailable. Start Docker Desktop and run `docker compose up postgres`, or set DATABASE_URL to sqlite."
         return JSONResponse(
             status_code=503,
             content={
-                "detail": "database is unavailable. Start Docker Desktop and run `docker compose up postgres`, or set DATABASE_URL to sqlite.",
+                "detail": detail,
             },
         )
 
     application.include_router(health_router)
     application.include_router(github_router)
     application.include_router(reviews_router)
+    application.include_router(analytics_router)
     return application
 
 

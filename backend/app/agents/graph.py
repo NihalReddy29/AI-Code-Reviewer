@@ -13,6 +13,9 @@ from app.core.logging import get_logger, log_event
 from app.database.models import ReviewRunStatus
 from app.services.ingestion import IngestResult
 from app.tools.github import GitHubClient
+from app.agents.config_node import make_load_config_node
+from app.agents.nodes import ReviewGraphDeps, build_nodes, route_after_persist
+from app.agents.state import ReviewGraphState
 
 logger = get_logger(__name__)
 
@@ -21,12 +24,14 @@ def build_review_graph(deps: ReviewGraphDeps):
     """Fetch → repo analysis → (RAG ∥ static ∥ tests) → persist → conditional LLM passes → merge → verify."""
 
     nodes = build_nodes(deps)
+    nodes["load_config"] = make_load_config_node(deps)
     builder = StateGraph(ReviewGraphState)
     for name, fn in nodes.items():
         builder.add_node(name, fn)
 
     builder.add_edge(START, "fetch_snapshot")
-    builder.add_edge("fetch_snapshot", "analyze_repository")
+    builder.add_edge("fetch_snapshot", "load_config")
+    builder.add_edge("load_config", "analyze_repository")
     builder.add_edge("analyze_repository", "retrieve_context")
     builder.add_edge("analyze_repository", "run_static_analysis")
     builder.add_edge("analyze_repository", "run_tests")
@@ -74,6 +79,7 @@ def run_review_graph(
             "delivery_id": delivery_id,
             "errors": [],
             "events": [],
+            "config_warnings": [],
         }
     )
     review_run_id: UUID = final_state["review_run_id"]

@@ -140,6 +140,14 @@ class ReviewRun(Base):
     errors: Mapped[list | dict | None] = mapped_column(PortableJSON(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Per-repo config that was resolved for this run.
+    # resolved_config: the full RepoConfig as a JSON dict (None if no config file was found).
+    # config_sha: SHA-256 hex of the raw .codereviewer.yml bytes (None if no config file).
+    # NOTE: these columns are added via ALTER TABLE in production if Alembic is not present;
+    # in SQLite test databases they are created from scratch by Base.metadata.create_all().
+    resolved_config: Mapped[dict | None] = mapped_column(PortableJSON(), nullable=True)
+    config_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     pull_request: Mapped[PullRequest] = relationship(back_populates="review_runs")
     reviews: Mapped[list[Review]] = relationship(back_populates="review_run", cascade="all, delete-orphan")
     findings: Mapped[list[Finding]] = relationship(

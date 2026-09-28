@@ -48,6 +48,9 @@ class ReviewRunResponse(BaseModel):
     github_review_id: int | None = None
     findings: list[FindingResponse] = Field(default_factory=list)
     errors: list | dict | None = None
+    resolved_config: dict | None = None
+    config_sha: str | None = None
+    score: int | None = None
     execution_time_ms: int | None = None
     created_at: datetime | None = None
     started_at: datetime | None = None
@@ -67,6 +70,7 @@ class ReviewRunSummary(BaseModel):
     target_branch: str | None = None
     finding_count: int = 0
     verified_count: int = 0
+    score: int | None = None
     posted_to_github: bool = False
     github_review_id: int | None = None
     execution_time_ms: int | None = None

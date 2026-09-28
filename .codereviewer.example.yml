@@ -1,0 +1,49 @@
+# .codereviewer.yml
+# Place this file in the root of your repository to configure AI Code Reviewer.
+# Note: Rules are read from the PR's target/base branch so PRs cannot bypass rules.
+
+version: 1
+
+# File paths to exclude from review diffs and static analysis
+paths:
+  ignore:
+    - "docs/**"
+    - "**/migrations/**"
+    - "*.lock"
+    - "vendor/**"
+
+# Toggle individual analyzers and test execution
+tools:
+  ruff: true         # Python linter & code formatter checks
+  pyright: true      # Python static type checking
+  bandit: true       # Python security & vulnerability scanning
+  semgrep: true      # Pattern-based AST static security analysis
+  pytest: true       # Run test suite on changed / related tests
+
+# Review filtering and instructions
+review:
+  # Minimum severity required to post an inline comment:
+  # CRITICAL, HIGH, MEDIUM, LOW, or INFO (default: MEDIUM)
+  min_severity: MEDIUM
+
+  # Maximum number of inline comments posted to the PR (1 - 50, default: 20).
+  # Findings beyond this limit are summarized in the review body.
+  max_comments: 20
+
+  # Categories to include (default: null / all categories).
+  # Options: SECURITY, BUG, PERFORMANCE, CODE_QUALITY, MAINTAINABILITY, TESTING, DOCUMENTATION
+  categories:
+    - SECURITY
+    - BUG
+    - PERFORMANCE
+    - CODE_QUALITY
+    - MAINTAINABILITY
+    - TESTING
+    - DOCUMENTATION
+
+  # Custom repository conventions passed to the review agent.
+  # Max length 2,000 characters. Secrets will be automatically redacted.
+  guidelines: |
+    - All public API functions must include docstrings with argument and return types.
+    - SQL queries must strictly use bound parameters; raw string formatting is prohibited.
+    - Avoid catch-all `except Exception:` blocks where specific exceptions can be caught.

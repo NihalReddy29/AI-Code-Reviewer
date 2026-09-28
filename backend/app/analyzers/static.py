@@ -38,6 +38,7 @@ def run_static_analyzers(
     *,
     languages: set[str],
     timeout_seconds: int,
+    enabled_tools: set[str] | None = None,
 ) -> StaticAnalysisReport:
     written = materialize_files(workspace, files)
     runs: list[ToolRun] = []
@@ -46,6 +47,10 @@ def run_static_analyzers(
         log_event(logger, "static_analysis_skipped", reason="no_supported_language")
         return StaticAnalysisReport(workspace_files=written, runs=runs)
     for name, analyzer in analyzers:
+        if enabled_tools is not None and name not in enabled_tools:
+            runs.append(ToolRun(tool=name, command=[name], available=False, error="skipped_by_config"))
+            log_event(logger, "static_analysis_tool_skipped", tool=name, reason="disabled_by_config")
+            continue
         try:
             result = analyzer(workspace, timeout_seconds)
         except Exception:

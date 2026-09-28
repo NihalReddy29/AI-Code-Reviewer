@@ -74,3 +74,27 @@ export async function listRepositories(): Promise<string[]> {
   const body = await request<{ repositories: Array<{ full_name: string }> }>("/repositories");
   return body.repositories.map((item) => item.full_name);
 }
+
+export function getAnalyticsOverview(params?: { repository?: string }): Promise<import("./types").AnalyticsOverview> {
+  const query = new URLSearchParams();
+  if (params?.repository) {
+    query.set("repository", params.repository);
+  }
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return request(`/analytics/overview${suffix}`);
+}
+
+export function getAnalyticsTrends(params?: {
+  days?: number;
+  repository?: string;
+}): Promise<import("./types").AnalyticsTrends> {
+  const query = new URLSearchParams();
+  if (params?.days) {
+    query.set("days", params.days.toString());
+  }
+  if (params?.repository) {
+    query.set("repository", params.repository);
+  }
+  const suffix = query.size ? `?${query.toString()}` : "";
+  return request(`/analytics/trends${suffix}`);
+}

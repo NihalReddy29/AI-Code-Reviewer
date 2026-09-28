@@ -29,7 +29,7 @@ class Settings(BaseSettings):
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
 
     database_url: str = Field(
-        default="postgresql+psycopg://reviewer:reviewer@localhost:5432/ai_code_reviewer",
+        default="sqlite+pysqlite:///./local.db",
         description="SQLAlchemy URL. Do not store credentials in the database itself.",
     )
 

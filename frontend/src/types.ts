@@ -97,6 +97,7 @@ export type ReviewSummary = {
   target_branch: string | null;
   finding_count: number;
   verified_count: number;
+  score: number | null;
   posted_to_github: boolean;
   github_review_id: number | null;
   execution_time_ms: number | null;
@@ -114,6 +115,8 @@ export type ReviewDetail = ReviewSummary & {
   agent_trace: Array<Record<string, unknown>>;
   findings: Finding[];
   errors: unknown;
+  resolved_config?: Record<string, unknown> | null;
+  config_sha?: string | null;
   started_at: string | null;
 };
 
@@ -121,4 +124,35 @@ export type HealthStatus = {
   status: string;
   database: string;
   service: string;
+};
+
+export type FileFindingStat = {
+  file: string;
+  count: number;
+};
+
+export type AnalyticsOverview = {
+  total_reviews: number;
+  total_findings: number;
+  average_score: number;
+  score_label: string;
+  verified_count: number;
+  rejected_count: number;
+  unreviewed_count: number;
+  total_test_failures: number;
+  findings_by_severity: Record<string, number>;
+  findings_by_category: Record<string, number>;
+  top_files_by_findings: FileFindingStat[];
+};
+
+export type DailyTrendPoint = {
+  date: string;
+  review_count: number;
+  finding_count: number;
+  average_score: number;
+};
+
+export type AnalyticsTrends = {
+  days: number;
+  trends: DailyTrendPoint[];
 };

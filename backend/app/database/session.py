@@ -78,11 +78,30 @@ def check_database_connection() -> None:
         raise
 
 
+def _migrate_columns() -> None:
+    """Ensure columns added in newer models exist in the database."""
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        if inspector.has_table("review_runs"):
+            existing = {c["name"] for c in inspector.get_columns("review_runs")}
+            with engine.begin() as conn:
+                if "resolved_config" not in existing:
+                    col_type = "JSONB" if engine.dialect.name == "postgresql" else "JSON"
+                    conn.execute(text(f"ALTER TABLE review_runs ADD COLUMN resolved_config {col_type}"))
+                if "config_sha" not in existing:
+                    conn.execute(text("ALTER TABLE review_runs ADD COLUMN config_sha VARCHAR(64)"))
+    except Exception as exc:
+        logger.warning("column_migration_skipped", error=str(exc))
+
+
 def init_database() -> None:
     """Create tables if they do not exist. Migrations will replace this later."""
 
     from app.database import models  # noqa: F401  ensure models are registered
 
     Base.metadata.create_all(bind=engine)
+    _migrate_columns()
     log_event = get_logger("app.database")
     log_event.info("database_schema_ready")
+

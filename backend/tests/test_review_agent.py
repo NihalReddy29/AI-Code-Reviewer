@@ -105,3 +105,32 @@ def test_generate_structured_review_uses_injected_llm() -> None:
     result = generate_structured_review(snapshot, None, llm=llm)
     assert result.summary == "Look at SQL."
     assert result.findings[0].severity is FindingSeverity.HIGH
+
+
+# ── Phase 4: guidelines in the prompt ─────────────────────────────────────────
+
+def test_guidelines_block_appears_in_prompt_when_set() -> None:
+    """When guidelines are set, the delimited block must appear in the prompt."""
+    snapshot = _snapshot()
+    prompt = build_review_user_prompt(snapshot, None, guidelines="All public functions must have docstrings.")
+    assert "BEGIN REPOSITORY CONVENTIONS" in prompt
+    assert "END REPOSITORY CONVENTIONS" in prompt
+    assert "docstrings" in prompt
+
+
+def test_guidelines_block_absent_when_empty() -> None:
+    """When guidelines is empty or None, the block must NOT appear."""
+    snapshot = _snapshot()
+    for g in (None, "", "   "):
+        prompt = build_review_user_prompt(snapshot, None, guidelines=g)
+        assert "BEGIN REPOSITORY CONVENTIONS" not in prompt
+
+
+def test_guidelines_secrets_are_redacted() -> None:
+    """Secrets inside guidelines must be redacted before reaching the prompt."""
+    snapshot = _snapshot()
+    prompt = build_review_user_prompt(
+        snapshot, None, guidelines="Use token=supersecretvalue for auth."
+    )
+    assert "supersecretvalue" not in prompt
+    assert "[REDACTED]" in prompt

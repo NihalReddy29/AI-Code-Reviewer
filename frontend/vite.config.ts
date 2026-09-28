@@ -19,6 +19,7 @@ export default defineConfig({
       "/reviews": apiProxy,
       "/repositories": apiProxy,
       "/health": apiProxy,
+      "/analytics": apiProxy,
     },
   },
   test: {

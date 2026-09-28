@@ -28,6 +28,7 @@ from app.schemas.review import (
     ReviewRunSummary,
 )
 from app.services.ingestion import ingest_pull_request, to_response
+from app.services.scoring import calculate_review_score
 from app.tools.github import GitHubAPIError, GitHubAuthError, build_github_client, github_is_configured
 
 router = APIRouter(tags=["reviews"])
@@ -121,6 +122,7 @@ def _review_summary(review_run: ReviewRun) -> ReviewRunSummary:
         target_branch=pull_request.target_branch,
         finding_count=len(review_run.findings),
         verified_count=sum(1 for item in review_run.findings if item.verified is True),
+        score=calculate_review_score(review_run.findings),
         posted_to_github=posted,
         github_review_id=github_review_id,
         execution_time_ms=review_run.execution_time_ms,
@@ -164,6 +166,9 @@ def _review_detail(review_run: ReviewRun) -> ReviewRunResponse:
         github_review_id=review_run.reviews[0].github_review_id if review_run.reviews else None,
         findings=[_finding_response(item) for item in review_run.findings],
         errors=review_run.errors,
+        resolved_config=review_run.resolved_config,
+        config_sha=review_run.config_sha,
+        score=calculate_review_score(review_run.findings),
         execution_time_ms=review_run.execution_time_ms,
         created_at=review_run.created_at,
         started_at=review_run.started_at,

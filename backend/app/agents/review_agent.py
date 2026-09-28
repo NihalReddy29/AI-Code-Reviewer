@@ -67,6 +67,7 @@ def generate_structured_review(
     static_analysis: StaticAnalysisReport | None = None,
     test_results: TestRunReport | None = None,
     system_prompt: str | None = None,
+    guidelines: str | None = None,
 ) -> StructuredReview:
     """Call the configured LLM and validate structured findings.
 
@@ -79,7 +80,8 @@ def generate_structured_review(
         llm = build_chat_model()
 
     user_prompt = build_review_user_prompt(
-        snapshot, repository_context, retrieved_context, static_analysis, test_results
+        snapshot, repository_context, retrieved_context, static_analysis, test_results,
+        guidelines=guidelines,
     )
     try:
         structured = llm.with_structured_output(StructuredReview)

@@ -49,8 +49,9 @@ def test_build_review_comments_skips_unverified_and_redacts_secrets() -> None:
             ),
         ],
     )
-    comments, posted, omitted = build_review_comments(review, snapshot)
+    comments, posted, omitted, cap_omitted = build_review_comments(review, snapshot)
     assert omitted == 0
+    assert cap_omitted == []
     assert len(posted) == 1
     assert len(comments) == 1
     assert comments[0]["side"] == "RIGHT"
@@ -147,3 +148,88 @@ def test_github_post_reviews_can_be_disabled(db_session: Session, monkeypatch) -
     finally:
         monkeypatch.delenv("GITHUB_POST_REVIEWS", raising=False)
         clear_settings_cache()
+
+
+# ── Phase 3: posting limits ────────────────────────────────────────────────────
+
+def test_min_severity_high_drops_medium() -> None:
+    """Findings at MEDIUM should be filtered out when min_severity=HIGH."""
+    from app.schemas.findings import FindingSeverity
+    from app.services.github_comments import build_review_comments
+
+    snapshot = _snapshot()
+    review = StructuredReview(
+        summary="mixed",
+        findings=[
+            _finding(verified=True, severity=FindingSeverity.HIGH),
+            _finding(verified=True, severity=FindingSeverity.MEDIUM, title="Medium finding"),
+        ],
+    )
+    comments, posted, omitted, cap_omitted = build_review_comments(
+        review, snapshot, min_severity=FindingSeverity.HIGH
+    )
+    assert len(posted) == 1
+    assert posted[0].severity is FindingSeverity.HIGH
+
+
+def test_max_comments_truncates_and_goes_to_body() -> None:
+    """Findings beyond max_comments go into cap_omitted (not posted inline)."""
+    from app.schemas.findings import FindingSeverity
+    from app.services.github_comments import build_review_comments
+
+    snapshot = _snapshot()
+    # Create 3 identical findings (same file/line so they all anchor)
+    findings = [
+        _finding(verified=True, severity=FindingSeverity.HIGH, title=f"Issue {i}", line=11)
+        for i in range(3)
+    ]
+    review = StructuredReview(summary="many issues", findings=findings)
+    comments, posted, omitted, cap_omitted = build_review_comments(
+        review, snapshot, max_comments=2
+    )
+    assert len(posted) <= 2
+    assert len(cap_omitted) >= 1
+    total = len(posted) + len(cap_omitted)
+    assert total == 3
+
+
+def test_categories_filter_works() -> None:
+    """Only findings in the allowed categories should be posted."""
+    from app.schemas.findings import FindingCategory, FindingSeverity
+    from app.services.github_comments import build_review_comments
+
+    snapshot = _snapshot()
+    review = StructuredReview(
+        summary="mixed",
+        findings=[
+            _finding(verified=True, category=FindingCategory.SECURITY),
+            _finding(verified=True, category=FindingCategory.CODE_QUALITY, title="Quality issue"),
+        ],
+    )
+    comments, posted, omitted, cap_omitted = build_review_comments(
+        review, snapshot, categories=[FindingCategory.SECURITY]
+    )
+    assert len(posted) == 1
+    assert posted[0].category is FindingCategory.SECURITY
+
+
+# ── Phase 5: config warnings surfaced on the PR ────────────────────────────────
+
+def test_config_warning_appears_in_review_body() -> None:
+    from app.services.github_comments import format_review_body
+
+    snapshot = _snapshot()
+    review = StructuredReview(summary="ok", findings=[])
+    body = format_review_body(
+        review, [], 0, config_warnings=["Invalid .codereviewer.yml; using defaults."]
+    )
+    assert "⚠️" in body
+    assert ".codereviewer.yml" in body
+
+
+def test_config_warning_absent_when_no_warnings() -> None:
+    from app.services.github_comments import format_review_body
+
+    review = StructuredReview(summary="ok", findings=[])
+    body = format_review_body(review, [], 0, config_warnings=[])
+    assert "⚠️" not in body

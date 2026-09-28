@@ -120,7 +120,29 @@ def build_nodes(deps: ReviewGraphDeps) -> dict[str, Any]:
         }
 
     def run_static_analysis(state: dict[str, Any]) -> dict[str, Any]:
-        report, errors = run_pull_request_static_analysis(deps.client, state["snapshot"])
+        config = state.get("repo_config")
+        enabled_tools: set[str] | None = None
+        if config is not None:
+            tools = config.tools
+            if not (tools.ruff or tools.pyright or tools.bandit or tools.semgrep):
+                return {
+                    "static_analysis": StaticAnalysisReport(),
+                    "errors": [],
+                    "events": [_event("run_static_analysis", "skipped", reason="disabled_by_config")],
+                }
+            enabled_tools = {
+                name
+                for name, flag in [
+                    ("ruff", tools.ruff),
+                    ("pyright", tools.pyright),
+                    ("bandit", tools.bandit),
+                    ("semgrep", tools.semgrep),
+                ]
+                if flag
+            }
+        report, errors = run_pull_request_static_analysis(
+            deps.client, state["snapshot"], enabled_tools=enabled_tools
+        )
         return {
             "static_analysis": report,
             "errors": errors or [],
@@ -128,6 +150,14 @@ def build_nodes(deps: ReviewGraphDeps) -> dict[str, Any]:
         }
 
     def run_tests(state: dict[str, Any]) -> dict[str, Any]:
+        config = state.get("repo_config")
+        if config is not None and not config.tools.pytest:
+            skipped = TestRunReport(skipped=True, skip_reason="disabled by .codereviewer.yml")
+            return {
+                "test_results": skipped.model_dump(),
+                "errors": [],
+                "events": [_event("run_tests", "skipped", reason="disabled_by_config")],
+            }
         report, errors = run_pull_request_tests(deps.client, state["snapshot"])
         return {
             "test_results": report.model_dump(),
@@ -177,6 +207,10 @@ def build_nodes(deps: ReviewGraphDeps) -> dict[str, Any]:
             stored = deps.session.get(ReviewRun, result.review_run_id)
             if stored is not None:
                 stored.agent_trace = list(state.get("events") or []) + [_event("persist_run", "ok")]
+                if "resolved_config" in state:
+                    stored.resolved_config = state["resolved_config"]
+                if "config_sha" in state:
+                    stored.config_sha = state["config_sha"]
                 deps.session.flush()
         return {
             "review_run_id": result.review_run_id,
@@ -206,6 +240,10 @@ def build_nodes(deps: ReviewGraphDeps) -> dict[str, Any]:
         return {"events": [_event("skip_review", "ok")]}
 
     def _focused_review(node: str, system_prompt: str, state: dict[str, Any]) -> StructuredReview | None:
+        repo_config = state.get("repo_config")
+        guidelines: str | None = None
+        if repo_config is not None and repo_config.review.guidelines:
+            guidelines = repo_config.review.guidelines
         try:
             return generate_structured_review(
                 state["snapshot"],
@@ -215,6 +253,7 @@ def build_nodes(deps: ReviewGraphDeps) -> dict[str, Any]:
                 static_analysis=state.get("static_analysis"),
                 test_results=state.get("test_results"),
                 system_prompt=system_prompt,
+                guidelines=guidelines,
             )
         except ReviewAgentError:
             logger.exception("%s_failed", node)
@@ -331,7 +370,13 @@ def build_nodes(deps: ReviewGraphDeps) -> dict[str, Any]:
             return record(_event("post_github_review", "skipped", reason="no_review"))
         review = raw_review if isinstance(raw_review, StructuredReview) else StructuredReview.model_validate(raw_review)
         try:
-            payload = post_verified_review(deps.client, state["snapshot"], review)
+            payload = post_verified_review(
+                deps.client,
+                state["snapshot"],
+                review,
+                config=state.get("repo_config"),
+                config_warnings=state.get("config_warnings") or [],
+            )
         except GitHubAPIError:
             errors = [{"component": "github_comments", "message": "failed to post GitHub review"}]
             return record(_event("post_github_review", "failed"), {"errors": errors})

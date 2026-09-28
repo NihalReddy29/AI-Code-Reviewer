@@ -42,6 +42,7 @@ def run_pull_request_static_analysis(
     snapshot: PullRequestSnapshot,
     *,
     timeout_seconds: int | None = None,
+    enabled_tools: set[str] | None = None,
 ) -> tuple[StaticAnalysisReport, list[dict[str, str]]]:
     """Analyze a temp copy of PR files. Does not execute repository code."""
 
@@ -66,7 +67,9 @@ def run_pull_request_static_analysis(
         timeout = min(timeout, 20)
     try:
         with tempfile.TemporaryDirectory(prefix="ai-code-reviewer-static-") as tmp:
-            report = run_static_analyzers(Path(tmp), files, languages=languages, timeout_seconds=timeout)
+            report = run_static_analyzers(
+                Path(tmp), files, languages=languages, timeout_seconds=timeout, enabled_tools=enabled_tools
+            )
         log_event(logger, "static_analysis_completed", issue_count=len(report.issues), tools=len(report.runs))
         return report, errors
     except Exception:
